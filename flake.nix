@@ -4,9 +4,13 @@
     naersk.url = "github:nix-community/naersk";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
   };
 
-  outputs = { self, flake-utils, naersk, nixpkgs, rust-overlay }:
+  outputs = { self, flake-utils, naersk, nixpkgs, rust-overlay, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -30,6 +34,8 @@
         # For `nix build` & `nix run`:
         packages = rec {
           nix-template = naersk'.buildPackage {
+            name = "nix-template";
+            version = "0.1.0";
             src = ./.;
             cargoBuildOptions = x: x ++ [ "-p" "nix-template" ];
             cargoTestOptions = x: x ++ [ "-p" "nix-template" ];
