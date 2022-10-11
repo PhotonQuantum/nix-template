@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
@@ -25,27 +24,6 @@ pub fn get_global_store() -> Arc<dyn Store + Send + Sync> {
 pub trait Store {
     fn try_get_cached(&self, path: &[String]) -> Option<String>;
     fn put_cache(&self, path: &[String], value: String);
-}
-
-#[derive(Clone, Default)]
-pub struct MemoryStore(Arc<Mutex<HashMap<Vec<String>, String>>>);
-
-impl MemoryStore {
-    pub fn new(map: HashMap<Vec<String>, String>) -> Self {
-        Self(Arc::new(Mutex::new(map)))
-    }
-}
-
-impl Store for MemoryStore {
-    fn try_get_cached(&self, path: &[String]) -> Option<String> {
-        info!("cache access: {:?}", path);
-        self.0.lock().unwrap().get(path).cloned()
-    }
-
-    fn put_cache(&self, path: &[String], value: String) {
-        info!("cache put: {:?} = {}", path, value);
-        self.0.lock().unwrap().insert(path.to_vec(), value);
-    }
 }
 
 #[derive(Clone)]
@@ -139,16 +117,39 @@ impl Store for FileStore {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    use log::info;
     use minijinja::Environment;
 
     use nix_template_macros::helper_func;
 
-    use crate::store::{FileStore, MemoryStore, Store};
+    use crate::store::{FileStore, Store};
     use crate::Result;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[derive(Clone, Default)]
+    pub struct MemoryStore(Arc<Mutex<HashMap<Vec<String>, String>>>);
+
+    impl MemoryStore {
+        pub fn new(map: HashMap<Vec<String>, String>) -> Self {
+            Self(Arc::new(Mutex::new(map)))
+        }
+    }
+
+    impl Store for MemoryStore {
+        fn try_get_cached(&self, path: &[String]) -> Option<String> {
+            info!("cache access: {:?}", path);
+            self.0.lock().unwrap().get(path).cloned()
+        }
+
+        fn put_cache(&self, path: &[String], value: String) {
+            info!("cache put: {:?} = {}", path, value);
+            self.0.lock().unwrap().insert(path.to_vec(), value);
+        }
+    }
 
     fn with_store(store: impl Store + Send + Sync + 'static, f: impl FnOnce()) {
         let _lock = TEST_LOCK.lock().unwrap();
