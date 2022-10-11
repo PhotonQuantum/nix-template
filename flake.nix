@@ -1,57 +1,62 @@
 {
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
-    naersk.url = "github:nix-community/naersk";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+    };
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
     };
   };
 
-  outputs = { self, flake-utils, naersk, nixpkgs, rust-overlay, ... }:
+  outputs = { self, flake-utils, crane, nixpkgs, rust-overlay, ... }:
+    let
+      mkCrate = { crane', ... }:
+        let
+          crateName = crane'.crateNameFromCargoToml { src = ./nix-template; };
+        in
+        crane'.buildPackage {
+          src = crane'.cleanCargoSource ./.;
+          pname = crateName.pname;
+          version = crateName.version;
+        };
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs {
           inherit system overlays;
         };
-
-        rustDefault = pkgs.rust-bin.stable.latest.default;
         rustMinimal = pkgs.rust-bin.stable.latest.minimal;
-
-        naersk' = pkgs.callPackage naersk {
-          cargo = rustMinimal;
-          rustc = rustMinimal;
-        };
-
-        additionalBuildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [ pkgs.darwin.libiconv pkgs.darwin.Security ];
-        devBuildInputs = [ rustDefault ];
-
+        crane' = (crane.mkLib pkgs).overrideToolchain rustMinimal;
+        crate = pkgs.callPackage mkCrate { inherit crane'; };
       in
       {
         # For `nix build` & `nix run`:
         packages = rec {
-          nix-template = naersk'.buildPackage {
-            name = "nix-template";
-            version = "0.1.0";
-            src = ./.;
-            cargoBuildOptions = x: x ++ [ "-p" "nix-template" ];
-            cargoTestOptions = x: x ++ [ "-p" "nix-template" ];
-            nativeBuildInputs = additionalBuildInputs;
-          };
+          nix-template = crate;
           default = nix-template;
         };
 
         apps = rec {
-          nix-template = flake-utils.lib.mkApp { drv = self.packages.${system}.nix-template; };
+          nix-template = flake-utils.lib.mkApp { drv = crate; };
           default = nix-template;
-        };
-
-        # For `nix develop`:
-        devShells.default = pkgs.mkShell {
-          nativeBuildInputs = devBuildInputs ++ additionalBuildInputs;
+          repl = flake-utils.lib.mkApp {
+            drv = pkgs.writeShellScriptBin "repl" ''
+              confnix=$(mktemp)
+              echo "builtins.getFlake (toString $(git rev-parse --show-toplevel))" >$confnix
+              trap "rm $confnix" EXIT
+              nix repl $confnix
+            '';
+          };
         };
       }
     );
