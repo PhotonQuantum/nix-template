@@ -2,42 +2,32 @@
   inputs = {
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-    };
     flake-compat = {
       url = "github:edolstra/flake-compat";
       flake = false;
     };
   };
 
-  outputs = { self, flake-utils, crane, nixpkgs, rust-overlay, ... }:
+  outputs = { self, flake-utils, nixpkgs, ... }:
     let
-      mkCrate = { crane', ... }:
+      mkCrate = { rustPlatform, ... }:
         let
-          crateName = crane'.crateNameFromCargoToml { src = ./nix-template; };
+          cargoToml = builtins.fromTOML (builtins.readFile ./nix-template/Cargo.toml);
+          pname = cargoToml.package.name;
+          version = cargoToml.package.version;
         in
-        crane'.buildPackage {
-          src = crane'.cleanCargoSource ./.;
-          pname = crateName.pname;
-          version = crateName.version;
-        };
+          rustPlatform.buildRustPackage {
+            inherit pname version;
+            src = self;
+            cargoLock.lockFile = self + "/Cargo.lock";
+          };
     in
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs {
-          inherit system overlays;
+          inherit system;
         };
-        rustMinimal = pkgs.rust-bin.stable.latest.minimal;
-        crane' = (crane.mkLib pkgs).overrideToolchain rustMinimal;
-        crate = pkgs.callPackage mkCrate { inherit crane'; };
+        crate = pkgs.callPackage mkCrate { };
       in
       {
         # For `nix build` & `nix run`:
